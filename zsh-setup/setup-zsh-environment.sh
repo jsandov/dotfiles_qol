@@ -52,7 +52,20 @@ source_module() {
         log_info "Installing $module..."
         # shellcheck source=/dev/null
         source "$module_path"
-        log_success "$module installation completed"
+        
+        # Call the module's main function if it exists
+        if declare -f main >/dev/null 2>&1; then
+            if main; then
+                log_success "$module installation completed successfully"
+                return 0
+            else
+                log_error "$module installation failed"
+                return 1
+            fi
+        else
+            log_warning "$module has no main function"
+            return 1
+        fi
     else
         log_error "Module not found: $module_path"
         return 1
