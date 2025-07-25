@@ -1,0 +1,348 @@
+#!/bin/bash
+
+# Script to create RKE2 Air-Gapped Ansible Project Structure
+# Usage: ./create_rke2_project.sh
+
+set -e
+
+PROJECT_DIR="rke2-airgap-deploy"
+
+echo "🚀 Creating RKE2 Air-Gapped Ansible Project Structure..."
+
+# Create main project directory
+mkdir -p "${PROJECT_DIR}"
+cd "${PROJECT_DIR}"
+
+echo "📁 Creating directory structure..."
+
+# Create all directories
+mkdir -p inventory/group_vars
+mkdir -p roles/rke2_airgap/{defaults,meta,tasks}
+
+echo "📝 Creating configuration files..."
+
+# 1) Create ansible.cfg
+cat > ansible.cfg << 'EOF'
+[defaults]
+inventory = inventory/hosts.yml
+roles_path = ./roles
+host_key_checking = False
+deprecation_warnings = False
+EOF
+
+# 2) Create inventory/hosts.yml
+cat > inventory/hosts.yml << 'EOF'
+all:
+  children:
+    rke2_servers:
+      hosts:
+        server1:
+          ansible_host: 192.168.1.10
+          ansible_user: root
+        server2:
+          ansible_host: 192.168.1.11
+          ansible_user: root
+EOF
+
+# 3) Create inventory/group_vars/rke2_servers.yml
+cat > inventory/group_vars/rke2_servers.yml << 'EOF'
+local_tarball_path: "/rke/deployment/c"
+remote_target_path: "/var/target"
+namespace_to_delete: "default"
+EOF
+
+# 4) Create site.yml
+cat > site.yml << 'EOF'
+---
+- name: Air-gapped RKE2 deployment
+  hosts: rke2_servers
+  become: yes
+  gather_facts: no
+  roles:
+    - rke2_airgap
+EOF
+
+# 5) Create roles/rke2_airgap/defaults/main.yml
+cat > roles/rke2_airgap/defaults/main.yml << 'EOF'
+---
+# override in group_vars if needed
+local_tarball_path: "/rke/deployment/c"
+remote_target_path: "/var/target"
+namespace_to_delete: "default"
+EOF
+
+# 6) Create roles/rke2_airgap/meta/main.yml
+cat > roles/rke2_airgap/meta/main.yml << 'EOF'
+---
+galaxy_info:
+  author: your_name
+  description: RKE2 air-gapped tarball deployment role
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: Linux
+      versions: all
+dependencies: []
+EOF
+
+# 7) Create roles/rke2_airgap/tasks/main.yml
+cat > roles/rke2_airgap/tasks/main.yml << 'EOF'
+---
+- include_tasks: check_target_dir.yml
+- include_tasks: locate_tarball.yml
+- include_tasks: copy_tarball.yml
+- include_tasks: extract_tarball.yml
+- include_tasks: find_scripts.yml
+- include_tasks: delete_namespace.yml
+- include_tasks: run_main_script.yml
+- include_tasks: update_script.yml
+- include_tasks: check_pods.yml
+- include_tasks: cleanup.yml
+EOF
+
+# 8) Create roles/rke2_airgap/tasks/check_target_dir.yml
+cat > roles/rke2_airgap/tasks/check_target_dir.yml << 'EOF'
+- name: Check that {{ remote_target_path }} exists on {{ inventory_hostname }}
+  stat:
+    path: "{{ remote_target_path }}"
+  register: target_dir
+
+- name: Fail if target directory is missing
+  fail:
+    msg: "❌ {{ remote_target_path }} does not exist on {{ inventory_hostname }}"
+  when: not target_dir.stat.exists
+
+- name: Confirm directory exists
+  debug:
+    msg: "✅ {{ remote_target_path }} exists on {{ inventory_hostname }}"
+EOF
+
+# 9) Create roles/rke2_airgap/tasks/locate_tarball.yml
+cat > roles/rke2_airgap/tasks/locate_tarball.yml << 'EOF'
+- name: Locate tarball in {{ local_tarball_path }}
+  local_action:
+    module: find
+    paths: "{{ local_tarball_path }}"
+    patterns: "*.tar.gz,*.tar,*.tgz"
+  register: found_tarballs
+  run_once: true
+
+- name: Fail if no tarball found locally
+  fail:
+    msg: "❌ No tarball found under {{ local_tarball_path }}"
+  when: found_tarballs.files | length == 0
+
+- name: Set tarball facts
+  set_fact:
+    tarball_file: "{{ found_tarballs.files[0].path }}"
+    tarball_name: "{{ found_tarballs.files[0].path | basename }}"
+EOF
+
+# 10) Create roles/rke2_airgap/tasks/copy_tarball.yml
+cat > roles/rke2_airgap/tasks/copy_tarball.yml << 'EOF'
+- name: Copy {{ tarball_name }} → {{ remote_target_path }}
+  debug:
+    msg: "⏳ Copying {{ tarball_name }} to {{ inventory_hostname }}:{{ remote_target_path }}/"
+- name: Perform copy
+  copy:
+    src: "{{ tarball_file }}"
+    dest: "{{ remote_target_path }}/{{ tarball_name }}"
+    mode: '0644'
+    backup: yes
+EOF
+
+# 11) Create roles/rke2_airgap/tasks/extract_tarball.yml
+cat > roles/rke2_airgap/tasks/extract_tarball.yml << 'EOF'
+- name: Extract {{ tarball_name }}
+  debug:
+    msg: "⏳ Extracting {{ tarball_name }}"
+- name: Perform extract
+  unarchive:
+    src: "{{ remote_target_path }}/{{ tarball_name }}"
+    dest: "{{ remote_target_path }}"
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+EOF
+
+# 12) Create roles/rke2_airgap/tasks/find_scripts.yml
+cat > roles/rke2_airgap/tasks/find_scripts.yml << 'EOF'
+- name: Locate main run script under {{ remote_target_path }}
+  find:
+    paths: "{{ remote_target_path }}"
+    patterns: "run.sh,install.sh,deploy.sh,start.sh"
+    recurse: yes
+    file_type: file
+  register: run_scripts
+
+- name: Fail if no run script found
+  fail:
+    msg: "❌ No run script found under {{ remote_target_path }}"
+  when: run_scripts.files | length == 0
+
+- name: Ensure run script is executable
+  file:
+    path: "{{ run_scripts.files[0].path }}"
+    mode: '0755'
+EOF
+
+# 13) Create roles/rke2_airgap/tasks/delete_namespace.yml
+cat > roles/rke2_airgap/tasks/delete_namespace.yml << 'EOF'
+- name: Delete namespace '{{ namespace_to_delete }}' if it exists
+  debug:
+    msg: "⏳ Deleting namespace '{{ namespace_to_delete }}'"
+- name: kubectl delete namespace
+  command: kubectl delete namespace {{ namespace_to_delete }} --ignore-not-found
+  register: delete_ns
+  failed_when: false
+
+- name: Show delete output
+  debug:
+    msg: "{{ delete_ns.stdout | default('no output') }}"
+
+- name: Wait for namespace removal
+  debug:
+    msg: "⏳ Waiting for namespace '{{ namespace_to_delete }}' to terminate"
+- name: Check namespace absence
+  command: kubectl get namespace {{ namespace_to_delete }}
+  register: ns_check
+  retries: 15
+  delay: 5
+  until: ns_check.rc != 0
+  failed_when: false
+
+- name: Confirm namespace removal
+  debug:
+    msg: "✅ Namespace '{{ namespace_to_delete }}' removed (rc={{ ns_check.rc }})"
+EOF
+
+# 14) Create roles/rke2_airgap/tasks/run_main_script.yml
+cat > roles/rke2_airgap/tasks/run_main_script.yml << 'EOF'
+- name: Execute main run script {{ run_scripts.files[0].path | basename }}
+  debug:
+    msg: "⏳ Running {{ run_scripts.files[0].path | basename }}"
+- name: Run script
+  shell: |
+    cd "{{ remote_target_path }}"
+    "{{ run_scripts.files[0].path | basename }}"
+  args:
+    chdir: "{{ remote_target_path }}"
+  register: script_out
+
+- name: Show script output
+  debug:
+    var: script_out.stdout_lines
+EOF
+
+# 15) Create roles/rke2_airgap/tasks/update_script.yml
+cat > roles/rke2_airgap/tasks/update_script.yml << 'EOF'
+- name: Check for update.sh script
+  stat:
+    path: "{{ remote_target_path }}/update.sh"
+  register: update_script
+
+- name: Make update.sh executable
+  file:
+    path: "{{ remote_target_path }}/update.sh"
+    mode: '0755'
+  when: update_script.stat.exists
+
+- name: Execute update.sh
+  debug:
+    msg: "⏳ Executing update.sh"
+  when: update_script.stat.exists
+- name: Run update.sh
+  shell: |
+    cd "{{ remote_target_path }}"
+    ./update.sh
+  register: update_out
+  args:
+    chdir: "{{ remote_target_path }}"
+  when: update_script.stat.exists
+
+- name: Show update output
+  debug:
+    var: update_out.stdout_lines
+  when: update_script.stat.exists and update_out is defined
+
+- name: Skip update step if not present
+  debug:
+    msg: "⚠️ update.sh not found, skipping"
+  when: not update_script.stat.exists
+EOF
+
+# 16) Create roles/rke2_airgap/tasks/check_pods.yml
+cat > roles/rke2_airgap/tasks/check_pods.yml << 'EOF'
+- name: Check all pods in CrashLoopBackOff
+  debug:
+    msg: "⏳ Checking for any pods in CrashLoopBackOff status"
+- name: Get all CrashLoopBackOff pods
+  shell: kubectl get pods --all-namespaces | grep 'CrashLoopBackOff' || true
+  register: all_crashloop_pods
+  failed_when: false
+
+- name: Display all CrashLoopBackOff pods
+  debug:
+    msg: "📋 CrashLoopBackOff pods:\n{{ all_crashloop_pods.stdout }}"
+  when: all_crashloop_pods.stdout != ""
+
+- name: No CrashLoopBackOff pods found
+  debug:
+    msg: "✅ No pods in CrashLoopBackOff status"
+  when: all_crashloop_pods.stdout == ""
+
+- name: Specifically check qwertylol pods
+  debug:
+    msg: "⏳ Checking qwertylol pods for CrashLoopBackOff"
+- name: Filter qwertylol CrashLoopBackOff pods
+  shell: |
+    kubectl get pods --all-namespaces \
+    | awk '$2 ~ /^qwertylol/ && $4=="CrashLoopBackOff" {print}' || true
+  register: qwertylol_crashloop_pods
+  failed_when: false
+
+- name: Set qwertylol_has_crashloop flag
+  set_fact:
+    qwertylol_has_crashloop: "{{ qwertylol_crashloop_pods.stdout != '' }}"
+
+- name: Report qwertylol status
+  debug:
+    msg: >-
+      {% if qwertylol_has_crashloop %}
+      📍 Status: qwertylol pod(s) in CrashLoopBackOff:
+      {{ qwertylol_crashloop_pods.stdout }}
+      {% else %}
+      ✅ qwertylol pods running normally
+      {% endif %}
+EOF
+
+# 17) Create roles/rke2_airgap/tasks/cleanup.yml
+cat > roles/rke2_airgap/tasks/cleanup.yml << 'EOF'
+- name: Removing tarball {{ tarball_name }}
+  debug:
+    msg: "⏳ Cleaning up {{ tarball_name }}"
+- name: Remove tarball file
+  file:
+    path: "{{ remote_target_path }}/{{ tarball_name }}"
+    state: absent
+- name: Cleanup complete
+  debug:
+    msg: "✅ Removed {{ tarball_name }}"
+EOF
+
+# Create README.md with usage instructions
+cat > README.md << 'EOF'
+# RKE2 Air-Gapped Deployment with Ansible
+
+This project provides a modular Ansible role for deploying RKE2 in air-gapped environments using tarball deployments.
+
+## Usage
+
+1. **Customize your inventory:**
+   Edit `inventory/hosts.yml` with your server details.
+
+2. **Configure variables:**
+   Modify `inventory/group_vars/rke2_servers.yml` with your paths and settings.
+
+3. **Run the deployment:**
