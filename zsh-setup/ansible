@@ -331,18 +331,63 @@ cat > roles/rke2_airgap/tasks/cleanup.yml << 'EOF'
     msg: "✅ Removed {{ tarball_name }}"
 EOF
 
-# Create README.md with usage instructions
+echo "📚 Creating documentation files..."
+
+# Create general README.md
 cat > README.md << 'EOF'
 # RKE2 Air-Gapped Deployment with Ansible
 
 This project provides a modular Ansible role for deploying RKE2 in air-gapped environments using tarball deployments.
 
-## Usage
+## Overview
 
-1. **Customize your inventory:**
-   Edit `inventory/hosts.yml` with your server details.
+This automation solution streamlines the deployment of RKE2 (Rancher Kubernetes Engine 2) in secure, air-gapped environments where internet connectivity is restricted or unavailable. The project uses Ansible to orchestrate the entire deployment process, from tarball transfer to pod health verification.
 
-2. **Configure variables:**
-   Modify `inventory/group_vars/rke2_servers.yml` with your paths and settings.
+## Key Features
 
-3. **Run the deployment:**
+- **Modular Design**: Each deployment step is separated into individual task files for easy maintenance and customization
+- **Air-Gap Ready**: Designed specifically for environments without internet access
+- **Comprehensive Monitoring**: Includes pod health checks and specific monitoring for critical components
+- **Error Handling**: Robust error handling and validation throughout the deployment process
+- **Scalable**: Easy to extend for multiple environments and additional deployment steps
+
+## Prerequisites
+
+- Ansible 2.9 or higher
+- SSH access to target RKE2 servers
+- Local tarball containing RKE2 deployment artifacts
+- kubectl configured for cluster access
+
+## Quick Start
+
+1. **Clone or create the project structure**
+2. **Configure your environment** - See [USAGE.md](USAGE.md) for detailed instructions
+3. **Review the structure** - See [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) for project layout
+4. **Deploy**: `ansible-playbook site.yml`
+
+## Documentation
+
+- [USAGE.md](USAGE.md) - Detailed usage instructions and configuration
+- [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) - Complete project structure explanation
+
+## Support
+
+This project follows Ansible best practices and uses only approved Ansible modules for maximum compatibility and security.
+
+## License
+
+MIT License - Feel free to modify and adapt for your specific requirements.
+EOF
+
+# Create USAGE.md
+cat > USAGE.md << 'EOF'
+# Usage Guide - RKE2 Air-Gapped Deployment
+
+This guide provides step-by-step instructions for using the RKE2 air-gapped deployment automation.
+
+## Configuration
+
+### 1. Server Inventory
+
+Edit `inventory/hosts.yml` to define your RKE2 servers:
+
